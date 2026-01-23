@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>直線BCと平面の関係</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #f0f0f0; font-family: "Hiragino Kaku Gothic ProN", sans-serif; }
+        
+        #ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            pointer-events: none;
+            z-index: 10;
+        }
+
+        #title-box {
+            background: rgba(255, 255, 255, 0.95);
+            padding: 8px;
+            text-align: center;
+            border-bottom: 1px solid #ccc;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .instruction {
+            font-size: 14px;
+            color: #333;
+            margin: 4px 0 0 0;
+        }
+
+        .legend {
+            display: inline-block;
+            margin: 0 10px;
+            font-weight: bold;
+            font-size: 14px;
+        }
+        .line-red { color: #ff0000; }
+        .dot-blue { color: #0077be; }
+    </style>
+</head>
+<body>
+    <div id="ui-layer">
+        <div id="title-box">
+            <span class="legend"><span class="line-red">―</span> 基準：直線BC</span>
+            <span class="legend"><span class="dot-blue">■</span> 比較：クリックで選択</span>
+            <p class="instruction">グレーの面をクリックして、直線BCとの関係を調べよう</p>
+        </div>
+    </div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        // --- シーン設定 ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0xffffff);
+
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
+        camera.position.set(5, 4, 7);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        document.body.appendChild(renderer.domElement);
+
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+
+        const raycaster = new THREE.Raycaster();
+        const pointer = new THREE.Vector2();
+        const selectableGroup = new THREE.Group(); 
+        scene.add(selectableGroup);
+
+        // --- 座標定義 (図に合わせて調整) ---
+        // A:奥左上, B:手前左上, C:手前右上, D:奥右上
+        // E:奥左下, F:手前左下, G:手前右下, H:奥右下
+        const v = {
+            A: [-1, 1, -1], B: [-1, 1, 1], C: [1, 1, 1], D: [1, 1, -1],
+            E: [-1, -1, -1], F: [-1, -1, 1], G: [1, -1, 1], H: [1, -1, -1]
+        };
+
+        // --- 1. 固定表示：直線BC (赤く、太く、長く) ---
+        // 直線BCはB(-1,1,1)とC(1,1,1)を通る -> X軸に平行
+        const linePoints = [new THREE.Vector3(-4, 1, 1), new THREE.Vector3(4, 1, 1)]; // 突き抜けさせる
+        const lineGeo = new THREE.BufferGeometry().setFromPoints(linePoints);
+        const lineMat = new THREE.LineBasicMaterial({ color: 0xff0000, linewidth: 5 });
+        const lineBC = new THREE.Line(lineGeo, lineMat);
+        scene.add(lineBC);
+
+        // ラベル "直線BC"
+        function makeTextSprite(message, color="black", fontsize=60) {
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            canvas.width = 256; canvas.height = 128;
+            ctx.font = "Bold " + fontsize + "px Arial";
+            ctx.fillStyle = color;
+            ctx.textAlign = "center"; ctx.textBaseline = "middle";
+            ctx.fillText(message, canvas.width/2, canvas.height/2);
+            const tex = new THREE.Texture(canvas); tex.needsUpdate = true;
+            return new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false }));
+        }
+        
+        const labelBC = makeTextSprite("直線BC", "red", 50);
+        labelBC.position.set(0, 1.3, 1); // 線の少し上に表示
+        labelBC.scale.set(2, 1, 1);
+        scene.add(labelBC);
+
+        // --- 2. 立方体の枠線と頂点 ---
+        const boxGeo = new THREE.BoxGeometry(2, 2, 2);
+        const edges = new THREE.EdgesGeometry(boxGeo);
+        const line = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0x333333, linewidth: 2 }));
+        scene.add(line);
+
+        const offset = 0.25;
+        for (const [key, val] of Object.entries(v)) {
+            const dot = new THREE.Mesh(new THREE.SphereGeometry(0.06), new THREE.MeshBasicMaterial({color:0x000000}));
+            dot.position.set(...val);
+            scene.add(dot);
+            
+            const sprite = makeTextSprite(key, "black");
+            sprite.position.set(val[0] + (val[0]>0?offset:-offset), val[1] + (val[1]>0?offset:-offset), val[2] + (val[2]>0?offset:-offset));
+            scene.add(sprite);
+        }
+
+        // --- 3. 選択可能な6つの平面 ---
+        const planeSize = 5; 
+        const planeGeo = new THREE.PlaneGeometry(planeSize, planeSize);
+
+        // マテリアル設定
+        const defaultMat = new THREE.MeshBasicMaterial({ 
+            color: 0x999999, 
+            side: THREE.DoubleSide, 
+            transparent: true, 
+            opacity: 0.1, 
+            depthWrite: false 
+        });
+        const activeMat = new THREE.MeshBasicMaterial({ 
+            color: 0x03a9f4, 
+            side: THREE.DoubleSide, 
+            transparent: true, 
+            opacity: 0.6,
+            depthWrite: false 
+        });
+
+        const planesData = [
+            { name: "ABCD(上)", pos: [0, 1, 0], rotX: -Math.PI/2, rotY: 0 },
+            { name: "EFGH(下)", pos: [0, -1, 0], rotX: -Math.PI/2, rotY: 0 },
+            { name: "ABFE(左)", pos: [-1, 0, 0], rotX: 0, rotY: Math.PI/2 }, // 図に合わせて左側面
+            { name: "DCGH(右)", pos: [1, 0, 0], rotX: 0, rotY: Math.PI/2 },  // 右側面
+            { name: "BCGF(前)", pos: [0, 0, 1], rotX: 0, rotY: 0 },          // 正面
+            { name: "ADHE(後)", pos: [0, 0, -1], rotX: 0, rotY: 0 }          // 背面
+        ];
+
+        planesData.forEach(data => {
+            const mesh = new THREE.Mesh(planeGeo, defaultMat.clone());
+            mesh.position.set(...data.pos);
+            mesh.rotation.x = data.rotX;
+            mesh.rotation.y = data.rotY;
+            mesh.userData = { isSelected: false };
+            selectableGroup.add(mesh);
+        });
+
+        // --- インタラクション (誤操作防止版) ---
+        let isDragging = false;
+        let startCoords = { x: 0, y: 0 };
+
+        window.addEventListener('pointerdown', (e) => {
+            isDragging = false;
+            startCoords.x = e.clientX;
+            startCoords.y = e.clientY;
+        });
+
+        window.addEventListener('pointermove', (e) => {
+            if (Math.abs(e.clientX - startCoords.x) > 5 || Math.abs(e.clientY - startCoords.y) > 5) {
+                isDragging = true;
+            }
+        });
+
+        window.addEventListener('pointerup', (event) => {
+            if (isDragging) return;
+
+            pointer.x = ( event.clientX / window.innerWidth ) * 2 - 1;
+            pointer.y = - ( event.clientY / window.innerHeight ) * 2 + 1;
+
+            raycaster.setFromCamera(pointer, camera);
+            const intersects = raycaster.intersectObjects(selectableGroup.children);
+
+            if (intersects.length > 0) {
+                const target = intersects[0].object;
+                const wasSelected = target.userData.isSelected;
+
+                // 全リセット
+                selectableGroup.children.forEach(mesh => {
+                    mesh.userData.isSelected = false;
+                    mesh.material = defaultMat.clone();
+                });
+
+                // 新規選択
+                if (!wasSelected) {
+                    target.userData.isSelected = true;
+                    target.material = activeMat;
+                }
+            }
+        });
+
+        // アニメーション
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+        }
+        animate();
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>

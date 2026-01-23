@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>空間図形観察アプリ</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #f0f0f0; font-family: "Hiragino Kaku Gothic ProN", "Meiryo", sans-serif; }
+        #controls {
+            position: absolute;
+            top: 10px;
+            left: 0;
+            width: 100%;
+            text-align: center;
+            z-index: 10;
+            pointer-events: none; /* ボタン以外はクリックを透過 */
+        }
+        .btn-group {
+            display: inline-block;
+            background: rgba(255, 255, 255, 0.8);
+            padding: 5px;
+            border-radius: 8px;
+            pointer-events: auto;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+        }
+        button {
+            background-color: #4CAF50;
+            border: none;
+            color: white;
+            padding: 8px 12px;
+            text-align: center;
+            text-decoration: none;
+            display: inline-block;
+            font-size: 14px;
+            margin: 2px;
+            cursor: pointer;
+            border-radius: 4px;
+            transition: background 0.3s;
+        }
+        button:hover { background-color: #45a049; }
+        button.active { background-color: #2E7D32; font-weight: bold; transform: scale(1.05); }
+        #canvas-container { width: 100vw; height: 100vh; }
+        .instruction { font-size: 12px; color: #555; margin-top: 5px; }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+</head>
+<body>
+
+    <div id="controls">
+        <div class="btn-group">
+            <button onclick="changeShape('tri_prism', this)">㋐</button>
+            <button onclick="changeShape('sq_pyramid', this)">㋑</button>
+            <button onclick="changeShape('cylinder', this)">㋒</button>
+            <button onclick="changeShape('cube', this)">㋓</button>
+            <button onclick="changeShape('cone', this)">㋔</button>
+            <button onclick="changeShape('sphere', this)">㋕</button>
+            <button onclick="changeShape('tri_pyramid', this)">㋖</button>
+            <div class="instruction">ボタンを押して図形を選択<br>ドラッグで回転・スクロールで拡大</div>
+        </div>
+    </div>
+
+    <div id="canvas-container"></div>
+
+    <script>
+        // シーン、カメラ、レンダラーの初期設定
+        const container = document.getElementById('canvas-container');
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0xf0f0f0);
+
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
+        camera.position.set(3, 3, 4);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        container.appendChild(renderer.domElement);
+
+        // ライトの設定
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        scene.add(ambientLight);
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.7);
+        dirLight.position.set(5, 10, 7);
+        scene.add(dirLight);
+
+        // コントロール（マウス操作）
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+
+        // 図形を保持する変数を準備
+        let currentMesh = null;
+        let currentEdges = null;
+
+        // マテリアル（質感）
+        const material = new THREE.MeshPhongMaterial({ 
+            color: 0x4aa3df, // 水色
+            transparent: true,
+            opacity: 0.9,
+            side: THREE.DoubleSide
+        });
+        const edgeMaterial = new THREE.LineBasicMaterial({ color: 0x333333, linewidth: 2 });
+
+        // 図形生成関数
+        function createGeometry(type) {
+            switch(type) {
+                case 'tri_prism': // ㋐ 三角柱
+                    return new THREE.CylinderGeometry(1, 1, 2, 3);
+                case 'sq_pyramid': // ㋑ 四角錐
+                    return new THREE.ConeGeometry(1.2, 2, 4);
+                case 'cylinder': // ㋒ 円柱
+                    return new THREE.CylinderGeometry(1, 1, 2, 32);
+                case 'cube': // ㋓ 四角柱（立方体・直方体）
+                    return new THREE.BoxGeometry(1.5, 1.5, 1.5);
+                case 'cone': // ㋔ 円錐
+                    return new THREE.ConeGeometry(1.2, 2, 32);
+                case 'sphere': // ㋕ 球
+                    return new THREE.SphereGeometry(1.2, 32, 32);
+                case 'tri_pyramid': // ㋖ 三角錐
+                    return new THREE.ConeGeometry(1.5, 2, 3);
+                default:
+                    return new THREE.BoxGeometry(1, 1, 1);
+            }
+        }
+
+        // 図形切り替え処理
+        function changeShape(type, btn) {
+            // 前の図形を削除
+            if(currentMesh) scene.remove(currentMesh);
+            if(currentEdges) scene.remove(currentEdges);
+
+            // ボタンのアクティブ表示切替
+            const buttons = document.querySelectorAll('button');
+            buttons.forEach(b => b.classList.remove('active'));
+            if(btn) btn.classList.add('active');
+
+            // ジオメトリ生成
+            const geometry = createGeometry(type);
+            
+            // 図形メッシュ作成
+            currentMesh = new THREE.Mesh(geometry, material);
+            
+            // エッジ（辺）の描画処理
+            // 球体以外はEdgesGeometryで見やすくする
+            if(type !== 'sphere') {
+                const edges = new THREE.EdgesGeometry(geometry);
+                currentEdges = new THREE.LineSegments(edges, edgeMaterial);
+                // 四角錐などを底面が見やすいように少し回転調整
+                if (type === 'sq_pyramid' || type === 'tri_pyramid' || type === 'cone') {
+                    // そのままでOK
+                }
+                currentMesh.add(currentEdges);
+            }
+
+            scene.add(currentMesh);
+        }
+
+        // 初期表示（㋐を選択状態に）
+        const firstBtn = document.querySelector('button');
+        changeShape('tri_prism', firstBtn);
+
+        // リサイズ対応
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // アニメーションループ
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+        }
+        animate();
+
+    </script>
+</body>
+</html>

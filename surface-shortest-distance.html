@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>直方体 紐掛け (修正版)</title>
+    <style>
+        /* 全体のレイアウト調整 */
+        body { margin: 0; overflow: hidden; font-family: "Hiragino Kaku Gothic ProN", "Meiryo", sans-serif; background: #ffffff; }
+        
+        /* コントロールパネル */
+        #controls {
+            position: absolute; top: 10px; left: 10px; width: 260px;
+            max-height: 90vh; overflow-y: auto;
+            background: rgba(255, 255, 255, 0.90); padding: 15px; border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.15); z-index: 10; border: 1px solid #ccc;
+        }
+        #controls::-webkit-scrollbar { width: 6px; }
+        #controls::-webkit-scrollbar-thumb { background: #ccc; border-radius: 3px; }
+
+        h2 { margin: 0 0 10px 0; font-size: 16px; color: #222; border-bottom: 2px solid #00acc1; padding-bottom: 5px; }
+        
+        /* スライダー */
+        .slider-group { margin-bottom: 8px; display: flex; align-items: center; font-size: 14px; }
+        label { width: 60px; font-weight: bold; color: #333; }
+        input[type=range] { flex: 1; margin: 0 8px; cursor: pointer; }
+        span.val { width: 30px; text-align: right; font-family: monospace; font-weight: bold; }
+        
+        /* ルート選択 */
+        .route-info { margin-top: 15px; }
+        .route-header { font-weight: bold; margin-bottom: 5px; color: #444; font-size: 14px; }
+        .route-row { 
+            display: flex; justify-content: space-between; align-items: center; 
+            margin-bottom: 6px; cursor: pointer; padding: 8px; 
+            border-radius: 6px; border: 1px solid #ddd; transition: all 0.2s; background: #fff;
+            font-size: 13px;
+        }
+        .route-row:hover { background: #f9f9f9; }
+        .route-row.active { background: #e0f7fa; border-color: #00acc1; font-weight: bold; }
+        .color-circle { display: inline-block; width: 14px; height: 14px; border-radius: 50%; margin-right: 8px; vertical-align: middle; border: 1px solid rgba(0,0,0,0.2); }
+        
+        /* 展開図エリア */
+        #canvas-container {
+            position: absolute; bottom: 10px; right: 10px;
+            background: white; border: 2px solid #bbb; box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+            z-index: 10; border-radius: 8px; padding: 10px;
+        }
+        #canvas-title { text-align: center; font-weight: bold; margin-bottom: 5px; font-size: 14px; color: #333; }
+        canvas { width: 220px; height: 180px; }
+        
+        .note { font-size: 12px; color: #666; margin-top: 15px; line-height: 1.4; background: #f4f4f4; padding: 8px; border-radius: 4px; }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+</head>
+<body>
+
+<div id="controls">
+    <h2>直方体の最短経路</h2>
+    <div class="slider-group">
+        <label>横(5)</label>
+        <input type="range" id="width" min="2" max="8" step="0.5" value="5">
+        <span class="val" id="val-w">5</span>
+    </div>
+    <div class="slider-group">
+        <label>高(4)</label>
+        <input type="range" id="height" min="2" max="8" step="0.5" value="4">
+        <span class="val" id="val-h">4</span>
+    </div>
+    <div class="slider-group">
+        <label>奥(3)</label>
+        <input type="range" id="depth" min="2" max="8" step="0.5" value="3">
+        <span class="val" id="val-d">3</span>
+    </div>
+
+    <div class="route-info">
+        <div class="route-header">ルート選択</div>
+        
+        <div id="route1" class="route-row active" onclick="setMode(0)">
+            <div><span class="color-circle" style="background:red;"></span>前＋底</div>
+            <span id="dist1"></span>
+        </div>
+        
+        <div id="route2" class="route-row" onclick="setMode(1)">
+            <div><span class="color-circle" style="background:blue;"></span>前＋右</div>
+            <span id="dist2"></span>
+        </div>
+        
+        <div id="route3" class="route-row" onclick="setMode(2)">
+            <div><span class="color-circle" style="background:green;"></span>上＋右</div>
+            <span id="dist3"></span>
+        </div>
+    </div>
+
+    <div class="note">
+        <strong>上:</strong>ABCD / <strong>下:</strong>EFGH<br>
+        (A=手前左上 → G=奥右下)<br>
+        ドラッグで回転します
+    </div>
+</div>
+
+<div id="canvas-container">
+    <div id="canvas-title">展開図</div>
+    <canvas id="netCanvas"></canvas>
+</div>
+
+<script>
+    // --- 初期設定 ---
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0xffffff);
+
+    const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
+    camera.position.set(25, 20, 30);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(window.devicePixelRatio);
+    document.body.appendChild(renderer.domElement);
+
+    const controls = new THREE.OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.minPolarAngle = 0;
+    controls.maxPolarAngle = Math.PI;
+
+    // 照明
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+    scene.add(ambientLight);
+    const dirLight = new THREE.DirectionalLight(0xffffff, 0.6);
+    dirLight.position.set(10, 20, 20);
+    scene.add(dirLight);
+    const dirLight2 = new THREE.DirectionalLight(0xffffff, 0.5);
+    dirLight2.position.set(-10, -10, -10);
+    scene.add(dirLight2);
+
+    const group = new THREE.Group();
+    scene.add(group);
+
+    let boxMesh, frameGroup, tubeMesh;
+    let startMarker, endMarker;
+    let labelsGroup = new THREE.Group();
+    group.add(labelsGroup);
+    let activeRouteIndex = 0; 
+
+    // DOM
+    const inputW = document.getElementById('width');
+    const inputH = document.getElementById('height');
+    const inputD = document.getElementById('depth');
+    const valW = document.getElementById('val-w');
+    const valH = document.getElementById('val-h');
+    const valD = document.getElementById('val-d');
+    
+    // 展開図キャンバス
+    const canvas = document.getElementById('netCanvas');
+    const cvw = 220;
+    const cvh = 180;
+    canvas.style.width = cvw + "px";
+    canvas.style.height = cvh + "px";
+    canvas.width = cvw * 2;
+    canvas.height = cvh * 2;
+    const ctx = canvas.getContext('2d');
+    ctx.scale(2, 2); 
+
+    const faceMaterials = [
+        new THREE.MeshLambertMaterial({ color: 0xdddddd, transparent: true, opacity: 0.2, side: THREE.DoubleSide }),
+        new THREE.MeshLambertMaterial({ color: 0xdddddd, transparent: true, opacity: 0.2, side: THREE.DoubleSide }),
+        new THREE.MeshLambertMaterial({ color: 0xffffff, transparent: true, opacity: 0.3, side: THREE.DoubleSide }),
+        new THREE.MeshLambertMaterial({ color: 0xeeeeee, transparent: true, opacity: 0.2, side: THREE.DoubleSide }),
+        new THREE.MeshLambertMaterial({ color: 0xffffff, transparent: true, opacity: 0.1, side: THREE.DoubleSide }),
+        new THREE.MeshLambertMaterial({ color: 0xdddddd, transparent: true, opacity: 0.2, side: THREE.DoubleSide })
+    ];
+
+    const routeColors = [0xff0000, 0x0000ff, 0x00aa00];
+
+    // 頂点ラベル
+    function createVertexLabel(text, pos) {
+        const cvs = document.createElement('canvas');
+        const c = cvs.getContext('2d');
+        cvs.width = 128; cvs.height = 128;
+        
+        c.font = "Bold 90px Arial Black, Arial, sans-serif";
+        c.textAlign = "center";
+        c.textBaseline = "middle";
+        c.strokeStyle = "white";
+        c.lineWidth = 12;
+        c.strokeText(text, 64, 64);
+        c.fillStyle = "black";
+        c.fillText(text, 64, 64);
+
+        const tex = new THREE.CanvasTexture(cvs);
+        const mat = new THREE.SpriteMaterial({ map: tex, depthTest: false });
+        const sprite = new THREE.Sprite(mat);
+        sprite.position.copy(pos);
+        sprite.scale.set(1.5, 1.5, 1.5);
+        sprite.renderOrder = 999;
+        return sprite;
+    }
+
+    // 枠線
+    function createThickEdges(w, h, d) {
+        const g = new THREE.Group();
+        const r = 0.08; 
+        const mat = new THREE.MeshLambertMaterial({ color: 0x444444 });
+
+        function makeCyl(len, pos, rot) {
+            const geo = new THREE.CylinderGeometry(r, r, len, 8);
+            const m = new THREE.Mesh(geo, mat);
+            m.position.copy(pos);
+            m.rotation.setFromVector3(rot);
+            g.add(m);
+        }
+        
+        const PI = Math.PI;
+        const hPi = PI / 2;
+        makeCyl(w, new THREE.Vector3(0, h/2, d/2), new THREE.Vector3(0,0,hPi));
+        makeCyl(w, new THREE.Vector3(0, h/2, -d/2), new THREE.Vector3(0,0,hPi));
+        makeCyl(w, new THREE.Vector3(0, -h/2, d/2), new THREE.Vector3(0,0,hPi));
+        makeCyl(w, new THREE.Vector3(0, -h/2, -d/2), new THREE.Vector3(0,0,hPi));
+        makeCyl(h, new THREE.Vector3(w/2, 0, d/2), new THREE.Vector3(0,0,0));
+        makeCyl(h, new THREE.Vector3(-w/2, 0, d/2), new THREE.Vector3(0,0,0));
+        makeCyl(h, new THREE.Vector3(w/2, 0, -d/2), new THREE.Vector3(0,0,0));
+        makeCyl(h, new THREE.Vector3(-w/2, 0, -d/2), new THREE.Vector3(0,0,0));
+        makeCyl(d, new THREE.Vector3(w/2, h/2, 0), new THREE.Vector3(hPi,0,0));
+        makeCyl(d, new THREE.Vector3(-w/2, h/2, 0), new THREE.Vector3(hPi,0,0));
+        makeCyl(d, new THREE.Vector3(w/2, -h/2, 0), new THREE.Vector3(hPi,0,0));
+        makeCyl(d, new THREE.Vector3(-w/2, -h/2, 0), new THREE.Vector3(hPi,0,0));
+        return g;
+    }
+
+    function update() {
+        const w = parseFloat(inputW.value);
+        const h = parseFloat(inputH.value);
+        const d = parseFloat(inputD.value);
+
+        valW.textContent = w;
+        valH.textContent = h;
+        valD.textContent = d;
+
+        if(boxMesh) group.remove(boxMesh);
+        if(frameGroup) group.remove(frameGroup);
+        if(tubeMesh) group.remove(tubeMesh);
+        if(startMarker) group.remove(startMarker);
+        if(endMarker) group.remove(endMarker);
+        labelsGroup.clear();
+
+        const geometry = new THREE.BoxGeometry(w, h, d);
+        const innerGeo = new THREE.BoxGeometry(w*0.99, h*0.99, d*0.99);
+        boxMesh = new THREE.Mesh(innerGeo, faceMaterials);
+        group.add(boxMesh);
+
+        frameGroup = createThickEdges(w, h, d);
+        group.add(frameGroup);
+
+        const vA = new THREE.Vector3(-w/2, h/2, d/2);
+        const vB = new THREE.Vector3(w/2, h/2, d/2);
+        const vC = new THREE.Vector3(w/2, h/2, -d/2);
+        const vD = new THREE.Vector3(-w/2, h/2, -d/2);
+        const vE = new THREE.Vector3(-w/2, -h/2, d/2);
+        const vF = new THREE.Vector3(w/2, -h/2, d/2);
+        const vG = new THREE.Vector3(w/2, -h/2, -d/2);
+        const vH = new THREE.Vector3(-w/2, -h/2, -d/2);
+
+        const offset = 0.5;
+        labelsGroup.add(createVertexLabel("A", vA.clone().add(new THREE.Vector3(-offset, offset, offset))));
+        labelsGroup.add(createVertexLabel("B", vB.clone().add(new THREE.Vector3(offset, offset, offset))));
+        labelsGroup.add(createVertexLabel("C", vC.clone().add(new THREE.Vector3(offset, offset, -offset))));
+        labelsGroup.add(createVertexLabel("D", vD.clone().add(new THREE.Vector3(-offset, offset, -offset))));
+        labelsGroup.add(createVertexLabel("E", vE.clone().add(new THREE.Vector3(-offset, -offset, offset))));
+        labelsGroup.add(createVertexLabel("F", vF.clone().add(new THREE.Vector3(offset, -offset, offset))));
+        labelsGroup.add(createVertexLabel("G", vG.clone().add(new THREE.Vector3(offset, -offset, -offset))));
+        labelsGroup.add(createVertexLabel("H", vH.clone().add(new THREE.Vector3(-offset, -offset, -offset))));
+
+        const startPos = vA;
+        const endPos = vG;
+
+        const dist1 = Math.sqrt(w*w + (h+d)*(h+d));
+        const dist2 = Math.sqrt((w+d)*(w+d) + h*h);
+        const dist3 = Math.sqrt((w+h)*(w+h) + d*d);
+
+        document.getElementById('dist1').textContent = `√${(w*w + Math.pow(h+d,2)).toFixed(0)} ≒ ${dist1.toFixed(1)}`;
+        document.getElementById('dist2').textContent = `√${(Math.pow(w+d,2) + h*h).toFixed(0)} ≒ ${dist2.toFixed(1)}`;
+        document.getElementById('dist3').textContent = `√${(Math.pow(w+h,2) + d*d).toFixed(0)} ≒ ${dist3.toFixed(1)}`;
+
+        let pathPoints = [startPos];
+        if (activeRouteIndex === 0) {
+            const ratio = h / (h+d);
+            const x_cross = -w/2 + w * ratio;
+            pathPoints.push(new THREE.Vector3(x_cross, -h/2, d/2));
+        } else if (activeRouteIndex === 1) {
+            const ratio = w / (w+d);
+            const y_cross = h/2 - h * ratio;
+            pathPoints.push(new THREE.Vector3(w/2, y_cross, d/2));
+        } else {
+            const ratio = w / (w+h);
+            const z_cross = d/2 - d * ratio;
+            pathPoints.push(new THREE.Vector3(w/2, h/2, z_cross));
+        }
+        
+        pathPoints.push(endPos);
+        const curve = new THREE.CatmullRomCurve3(pathPoints, false, 'catmullrom', 0.1);
+        const tubeGeo = new THREE.TubeGeometry(curve, 20, 0.15, 8, false);
+        tubeMesh = new THREE.Mesh(tubeGeo, new THREE.MeshLambertMaterial({ color: routeColors[activeRouteIndex] }));
+        group.add(tubeMesh);
+
+        const sphereGeo = new THREE.SphereGeometry(0.35);
+        startMarker = new THREE.Mesh(sphereGeo, new THREE.MeshBasicMaterial({color:0x000000}));
+        startMarker.position.copy(startPos);
+        endMarker = new THREE.Mesh(sphereGeo, new THREE.MeshBasicMaterial({color:0x000000}));
+        endMarker.position.copy(endPos);
+        group.add(startMarker);
+        group.add(endMarker);
+
+        drawNet(w, h, d, activeRouteIndex);
+    }
+
+    function setMode(idx) {
+        activeRouteIndex = idx;
+        document.querySelectorAll('.route-row').forEach((el, i) => {
+            el.classList.toggle('active', i === idx);
+        });
+        update();
+    }
+
+    // 展開図描画（修正済）
+    function drawNet(w, h, d, mode) {
+        ctx.clearRect(0, 0, cvw, cvh);
+        const scale = 11; 
+        const pX = 30;
+        const pY = 30;
+        
+        ctx.save();
+        ctx.translate(pX, cvh - pY);
+        ctx.scale(scale, -scale);
+        
+        function drawRect(x, y, rw, rh, label, corners) {
+            ctx.fillStyle = "rgba(0,0,0,0.05)";
+            ctx.fillRect(x, y, rw, rh);
+            ctx.strokeStyle = "#444";
+            ctx.lineWidth = 2/scale;
+            ctx.strokeRect(x, y, rw, rh);
+
+            if(corners) {
+                ctx.save();
+                ctx.scale(1, -1);
+                ctx.fillStyle = "#000";
+                ctx.font = `bold ${14/scale}px Arial`;
+                const off = 10/scale;
+                // コーナーラベル配置: [TL, TR, BR, BL]
+                ctx.textAlign="right"; ctx.fillText(corners[0], x-off/3, -y-rh+off); // TL (y+h location in canvas -y)
+                ctx.textAlign="left";  ctx.fillText(corners[1], x+rw+off/3, -y-rh+off); // TR
+                ctx.textAlign="left";  ctx.fillText(corners[2], x+rw+off/3, -y-off/3);   // BR (y location)
+                ctx.textAlign="right"; ctx.fillText(corners[3], x-off/3, -y-off/3);   // BL
+                
+                // 修正: キャンバス座標系と配列の整合
+                // 配列順序: 左上, 右上, 右下, 左下
+                // fillTextのY座標: 
+                // 左上(TL)は y+rh の位置 -> - (y+rh)
+                // 左下(BL)は y の位置 -> -y
+                ctx.restore();
+            }
+        }
+        
+        // 描画ヘルパー：頂点配列は [TopLeft, TopRight, BottomRight, BottomLeft]
+        
+        if (mode === 0) {
+            // 赤: Front(前面) + Bottom(底面)
+            // Front: A(TL), B(TR), F(BR), E(BL)
+            drawRect(0, d, w, h, "", ["A","B","F","E"]);
+            // Bottom: E(TL-shared), F(TR-shared), G(BR), H(BL)
+            drawRect(0, 0, w, d, "", ["E","F","G","H"]);
+            
+            // Path: A(TopLeft) -> G(BottomRight)
+            ctx.strokeStyle = "red"; ctx.lineWidth = 4/scale;
+            ctx.beginPath(); ctx.moveTo(0, h+d); ctx.lineTo(w, 0); ctx.stroke();
+            drawDim(w, h+d, scale);
+        } 
+        else if (mode === 1) {
+            // 青: Front(前面) + Right(右面)
+            // Front: A(TL), B(TR), F(BR), E(BL)
+            drawRect(0, 0, w, h, "", ["A","B","F","E"]);
+            // Right: B(TL-shared), C(TR), G(BR), F(BL-shared)
+            // Frontの右にRightをつける
+            drawRect(w, 0, d, h, "", ["B","C","G","F"]);
+            
+            // Path: A(TopLeft) -> G(BottomRight)
+            ctx.strokeStyle = "blue"; ctx.lineWidth = 4/scale;
+            ctx.beginPath(); ctx.moveTo(0, h); ctx.lineTo(w+d, 0); ctx.stroke();
+            drawDim(w+d, h, scale);
+        } 
+        else if (mode === 2) {
+            // 緑: Top(上面) + Right(右面) 【修正箇所】
+            
+            // 座標系: 下(y=0)が手前(Front側), 上(y=d)が奥(Back側)
+            
+            // 左側: Top面 (WxD)
+            // 奥左(D), 奥右(C), 手前右(B), 手前左(A)
+            // Net上の配置: y=0が手前(A,B), y=dが奥(D,C)
+            // TL=D, TR=C, BR=B, BL=A
+            drawRect(0, 0, w, d, "", ["D","C","B","A"]); 
+            
+            // 右側: Right面 (HxD)
+            // Topの右(x=w)に接続。接続辺はCB(奥-手前)
+            // Right面の頂点: C(奥上), B(手前上), F(手前下), G(奥下)
+            // 展開すると、高さ方向が横幅Hになる。
+            // 接続辺はCB。外側はGF。
+            // 奥側(y=d)は C-G ライン。 手前側(y=0)は B-F ライン。
+            // TL=C(shared), TR=G, BR=F, BL=B(shared)
+            drawRect(w, 0, h, d, "", ["C","G","F","B"]); 
+            
+            // Path: A(手前左) -> G(奥右下)
+            // Aは(0,0)。 Gは(w+h, d)。
+            // 線は右上がりになるはず
+            ctx.strokeStyle = "green"; ctx.lineWidth = 4/scale;
+            ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(w+h, d); ctx.stroke();
+            drawDim(w+h, d, scale);
+        }
+        ctx.restore();
+    }
+
+    function drawDim(ww, hh, scale) {
+        ctx.save(); ctx.scale(1,-1); ctx.font = `bold ${14/scale}px sans-serif`; ctx.fillStyle="#222";
+        // 寸法線の位置調整
+        if(hh > 0) {
+            // 通常（左下原点）
+            ctx.fillText(ww.toFixed(1), ww/2, 20);
+            ctx.fillText(hh.toFixed(1), -20, -hh/2);
+        } 
+        ctx.restore();
+    }
+
+    inputW.addEventListener('input', update);
+    inputH.addEventListener('input', update);
+    inputD.addEventListener('input', update);
+    window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        update();
+    });
+
+    function animate() {
+        requestAnimationFrame(animate);
+        controls.update();
+        labelsGroup.children.forEach(lbl => lbl.lookAt(camera.position));
+        renderer.render(scene, camera);
+    }
+
+    update();
+    animate();
+</script>
+</body>
+</html>surface-shortest-distance

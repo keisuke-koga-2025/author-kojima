@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>直線と平面の垂直条件（修正版）</title>
+    <style>
+        /* 全体を縦並びのレイアウトにする */
+        body {
+            margin: 0;
+            background-color: #f0f0f0;
+            font-family: "Hiragino Kaku Gothic ProN", sans-serif;
+            display: flex;
+            flex-direction: column;
+            height: 100vh; /* 画面いっぱいの高さ */
+            overflow: hidden;
+        }
+
+        /* 上部の操作・説明エリア（固定） */
+        #ui-container {
+            flex-shrink: 0;
+            background: #ffffff;
+            padding: 15px;
+            text-align: center;
+            border-bottom: 2px solid #ddd;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            z-index: 10;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 10px;
+        }
+
+        /* ボタン群 */
+        .btn-group {
+            display: flex;
+            gap: 15px;
+        }
+
+        button {
+            padding: 8px 16px;
+            font-size: 14px;
+            border: none;
+            border-radius: 4px;
+            color: white;
+            cursor: pointer;
+            font-weight: bold;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+            transition: transform 0.1s;
+        }
+        button:active { transform: translateY(1px); }
+
+        #btn-fail { background-color: #e53935; } /* 赤 */
+        #btn-success { background-color: #1e88e5; } /* 青 */
+
+        /* 説明テキスト */
+        #message-box {
+            font-size: 16px;
+            font-weight: bold;
+            color: #333;
+            line-height: 1.4;
+            min-height: 2.8em; /* 2行分の高さを確保してガタつき防止 */
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        /* 下部の3Dキャンバスエリア（可変） */
+        #canvas-container {
+            flex-grow: 1;
+            width: 100%;
+            position: relative;
+            background-color: #ffffff;
+        }
+        #canvas-container canvas {
+            display: block;
+            width: 100% !important;
+            height: 100% !important;
+        }
+    </style>
+</head>
+<body>
+    <div id="ui-container">
+        <div class="btn-group">
+            <button id="btn-fail" onclick="setMode(false)">① 直線mとだけ垂直 (失敗)</button>
+            <button id="btn-success" onclick="setMode(true)">② 直線m, nと垂直 (成功)</button>
+        </div>
+        <div id="message-box">ボタンを押して確認してください</div>
+    </div>
+
+    <div id="canvas-container"></div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        // --- 初期化 ---
+        const container = document.getElementById('canvas-container');
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0xffffff);
+
+        // カメラ設定
+        const camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 100);
+        camera.position.set(5, 5, 8);
+        camera.lookAt(0, 0, 0);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(container.clientWidth, container.clientHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        container.appendChild(renderer.domElement);
+
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+
+        // --- オブジェクト作成 ---
+
+        // 1. 平面
+        const planeGeo = new THREE.PlaneGeometry(8, 8);
+        const planeMat = new THREE.MeshBasicMaterial({ color: 0xeeeeee, side: THREE.DoubleSide }); // 少し明るく
+        const plane = new THREE.Mesh(planeGeo, planeMat);
+        plane.rotation.x = -Math.PI / 2;
+        scene.add(plane);
+        
+        // グリッドヘルパー（地面の感覚をつかみやすくする）
+        const grid = new THREE.GridHelper(8, 8, 0xcccccc, 0xeeeeee);
+        scene.add(grid);
+
+        // 2. 直線 m (青, X軸)
+        const lineM_Geo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(-4, 0, 0), new THREE.Vector3(4, 0, 0)]);
+        const lineM = new THREE.Line(lineM_Geo, new THREE.LineBasicMaterial({ color: 0x0000ff, linewidth: 3 }));
+        scene.add(lineM);
+
+        // 3. 直線 n (緑, Z軸)
+        const lineN_Geo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, -4), new THREE.Vector3(0, 0, 4)]);
+        const lineN = new THREE.Line(lineN_Geo, new THREE.LineBasicMaterial({ color: 0x00aa00, linewidth: 3 }));
+        scene.add(lineN);
+
+        // 4. 赤い直線 (動く線)
+        const redLineGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 5, 0)]);
+        const redLineMat = new THREE.LineBasicMaterial({ color: 0xff0000, linewidth: 5 });
+        const redLine = new THREE.Line(redLineGeo, redLineMat);
+        scene.add(redLine);
+
+        // --- 垂直マーク ---
+        
+        // マーク1: 青い線(m)との垂直マーク (赤線の子要素)
+        const markSize = 0.5;
+        const markM_Geo = new THREE.BufferGeometry().setFromPoints([
+            new THREE.Vector3(markSize, 0, 0),
+            new THREE.Vector3(markSize, markSize, 0),
+            new THREE.Vector3(0, markSize, 0)
+        ]);
+        const markM = new THREE.Line(markM_Geo, new THREE.LineBasicMaterial({ color: 0x333333 }));
+        redLine.add(markM); 
+
+        // マーク2: 緑の線(n)との垂直マーク (シーン直下)
+        const markN_Geo = new THREE.BufferGeometry().setFromPoints([
+            new THREE.Vector3(0, 0, markSize),
+            new THREE.Vector3(0, markSize, markSize),
+            new THREE.Vector3(0, markSize, 0)
+        ]);
+        const markN = new THREE.Line(markN_Geo, new THREE.LineBasicMaterial({ color: 0x333333 }));
+        scene.add(markN);
+        markN.visible = false;
+
+        // --- 文字ラベル ---
+        function createLabel(text, color, pos) {
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            canvas.width = 128; canvas.height = 128;
+            ctx.font = "bold 80px Arial";
+            ctx.fillStyle = color;
+            ctx.textAlign = "center"; ctx.textBaseline = "middle";
+            ctx.fillText(text, 64, 64);
+            const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.Texture(canvas), depthTest: false }));
+            sprite.material.map.needsUpdate = true;
+            sprite.position.copy(pos);
+            sprite.scale.set(1.5, 1.5, 1);
+            return sprite;
+        }
+        scene.add(createLabel("m", "blue", new THREE.Vector3(3.5, 0.5, 0)));
+        scene.add(createLabel("n", "green", new THREE.Vector3(0, 0.5, 3.5)));
+
+        // --- アニメーションと状態管理 ---
+        let isSuccessMode = false;
+        const messageBox = document.getElementById('message-box');
+
+        window.setMode = function(success) {
+            isSuccessMode = success;
+            if (success) {
+                messageBox.innerHTML = "直線m(青)とも、直線n(緑)とも垂直。<br><span style='color:#1e88e5'>だから平面と垂直！</span>";
+                markN.visible = true;
+            } else {
+                messageBox.innerHTML = "直線m(青)とは垂直だけど、<br><span style='color:#e53935'>傾いているから平面とは垂直じゃない！</span>";
+                markN.visible = false;
+            }
+        };
+
+        setMode(false); // 初期状態
+
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            // 赤線を滑らかに傾ける
+            const targetAngle = isSuccessMode ? 0 : Math.PI / 4; 
+            redLine.rotation.x += (targetAngle - redLine.rotation.x) * 0.1;
+
+            controls.update();
+            renderer.render(scene, camera);
+        }
+        animate();
+
+        // リサイズ対応（コンテナ基準）
+        window.addEventListener('resize', () => {
+            const w = container.clientWidth;
+            const h = container.clientHeight;
+            camera.aspect = w / h;
+            camera.updateProjectionMatrix();
+            renderer.setSize(w, h);
+        });
+    </script>
+</body>
+</html>

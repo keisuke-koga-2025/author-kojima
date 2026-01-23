@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>面ABCD基準シミュレーター（誤操作防止版）</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #f0f0f0; font-family: "Hiragino Kaku Gothic ProN", sans-serif; }
+        
+        #ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            pointer-events: none;
+            z-index: 10;
+        }
+
+        #title-box {
+            background: rgba(255, 255, 255, 0.95);
+            padding: 8px;
+            text-align: center;
+            border-bottom: 1px solid #ccc;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .instruction {
+            font-size: 14px;
+            color: #333;
+            margin: 4px 0 0 0;
+        }
+
+        .legend {
+            display: inline-block;
+            margin: 0 10px;
+            font-weight: bold;
+            font-size: 14px;
+        }
+        .dot-yellow { color: #d4a000; }
+        .dot-blue { color: #0077be; }
+    </style>
+</head>
+<body>
+    <div id="ui-layer">
+        <div id="title-box">
+            <span class="legend"><span class="dot-yellow">■</span> 基準：平面ABCD</span>
+            <span class="legend"><span class="dot-blue">■</span> 比較：クリックで選択</span>
+            <p class="instruction">グレーの面をクリック（回転中は反応しません）</p>
+        </div>
+    </div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        // --- シーン設定 ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0xffffff);
+
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
+        camera.position.set(6, 4, 7);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        document.body.appendChild(renderer.domElement);
+
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+
+        // クリック判定用
+        const raycaster = new THREE.Raycaster();
+        const pointer = new THREE.Vector2();
+        const selectableGroup = new THREE.Group(); 
+        scene.add(selectableGroup);
+
+        // --- 素材定義 ---
+        
+        // 1. 基準面（黄色・固定）
+        const fixedMat = new THREE.MeshBasicMaterial({ 
+            color: 0xffeb3b, 
+            side: THREE.DoubleSide, 
+            transparent: true, 
+            opacity: 0.6,
+            depthWrite: false 
+        });
+
+        // 2. 選択可能な面（通常時：薄いグレー）
+        const defaultMat = new THREE.MeshBasicMaterial({ 
+            color: 0x999999, 
+            side: THREE.DoubleSide, 
+            transparent: true, 
+            opacity: 0.1, // より薄くして見やすく
+            depthWrite: false 
+        });
+
+        // 3. 選択可能な面（選択時：水色）
+        const activeMat = new THREE.MeshBasicMaterial({ 
+            color: 0x03a9f4, 
+            side: THREE.DoubleSide, 
+            transparent: true, 
+            opacity: 0.6,
+            depthWrite: false 
+        });
+
+
+        // --- 図形作成 ---
+
+        // 立方体の枠線
+        const boxGeo = new THREE.BoxGeometry(2, 2, 2);
+        const edges = new THREE.EdgesGeometry(boxGeo);
+        const line = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0x333333, linewidth: 2 }));
+        scene.add(line);
+
+        // 頂点とラベル
+        const v = {
+            A: [-1, 1, -1], B: [-1, 1, 1], C: [1, 1, 1], D: [1, 1, -1],
+            E: [-1, -1, -1], F: [-1, -1, 1], G: [1, -1, 1], H: [1, -1, -1]
+        };
+
+        function makeTextSprite(message) {
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            canvas.width = 128; canvas.height = 128;
+            ctx.font = "Bold 60px Arial";
+            ctx.fillStyle = "black";
+            ctx.textAlign = "center"; ctx.textBaseline = "middle";
+            ctx.fillText(message, canvas.width/2, canvas.height/2);
+            const tex = new THREE.Texture(canvas); tex.needsUpdate = true;
+            const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false }));
+            return sprite;
+        }
+
+        const offset = 0.25;
+        for (const [key, val] of Object.entries(v)) {
+            const dot = new THREE.Mesh(new THREE.SphereGeometry(0.06), new THREE.MeshBasicMaterial({color:0x000000}));
+            dot.position.set(...val);
+            scene.add(dot);
+            const sprite = makeTextSprite(key);
+            sprite.position.set(val[0] + (val[0]>0?offset:-offset), val[1] + (val[1]>0?offset:-offset), val[2] + (val[2]>0?offset:-offset));
+            scene.add(sprite);
+        }
+
+        // --- 平面の配置 ---
+        const planeSize = 5; 
+        const planeGeo = new THREE.PlaneGeometry(planeSize, planeSize);
+
+        // A. 基準面 (ABCD - 上面)
+        const fixedPlane = new THREE.Mesh(planeGeo, fixedMat);
+        fixedPlane.rotation.x = -Math.PI / 2;
+        fixedPlane.position.y = 1;
+        scene.add(fixedPlane);
+
+        // B. 選択可能な5面
+        const planesData = [
+            { name: "EFGH(下)", pos: [0, -1, 0], rotX: -Math.PI/2, rotY: 0 },
+            { name: "ABFE(前)", pos: [0, 0, 1], rotX: 0, rotY: 0 },
+            { name: "DCGH(後)", pos: [0, 0, -1], rotX: 0, rotY: 0 },
+            { name: "BCGF(右)", pos: [1, 0, 0], rotX: 0, rotY: Math.PI/2 },
+            { name: "ADHE(左)", pos: [-1, 0, 0], rotX: 0, rotY: Math.PI/2 }
+        ];
+
+        planesData.forEach(data => {
+            const mesh = new THREE.Mesh(planeGeo, defaultMat.clone());
+            mesh.position.set(...data.pos);
+            mesh.rotation.x = data.rotX;
+            mesh.rotation.y = data.rotY;
+            mesh.userData = { isSelected: false }; 
+            selectableGroup.add(mesh); 
+        });
+
+
+        // --- インタラクション改良版（誤操作防止＆単一選択） ---
+
+        let isDragging = false;
+        let startCoords = { x: 0, y: 0 };
+
+        // 1. タッチ/クリック開始位置を記録
+        window.addEventListener('pointerdown', (e) => {
+            isDragging = false;
+            startCoords.x = e.clientX;
+            startCoords.y = e.clientY;
+        });
+
+        // 2. 動いたかどうかを判定
+        window.addEventListener('pointermove', (e) => {
+            const moveX = Math.abs(e.clientX - startCoords.x);
+            const moveY = Math.abs(e.clientY - startCoords.y);
+            // 5ピクセル以上動いたら「回転操作」とみなす
+            if (moveX > 5 || moveY > 5) {
+                isDragging = true;
+            }
+        });
+
+        // 3. 放した瞬間に判定
+        window.addEventListener('pointerup', (event) => {
+            // 回転操作だった場合は何もしない（誤操作防止）
+            if (isDragging) return;
+
+            // 以下、クリック確定時の処理
+            pointer.x = ( event.clientX / window.innerWidth ) * 2 - 1;
+            pointer.y = - ( event.clientY / window.innerHeight ) * 2 + 1;
+
+            raycaster.setFromCamera(pointer, camera);
+            const intersects = raycaster.intersectObjects(selectableGroup.children);
+
+            if (intersects.length > 0) {
+                const target = intersects[0].object;
+                const wasSelected = target.userData.isSelected;
+
+                // 【重要】一度すべての選択をリセット（単一選択にするため）
+                selectableGroup.children.forEach(mesh => {
+                    mesh.userData.isSelected = false;
+                    mesh.material = defaultMat.clone();
+                });
+
+                // すでに選ばれていたものをクリックした場合 → 解除して終了
+                // 選ばれていないものをクリックした場合 → 選択状態にする
+                if (!wasSelected) {
+                    target.userData.isSelected = true;
+                    target.material = activeMat;
+                }
+            } else {
+                // 背景をクリックしたら全解除（お好みで。今は何もしない）
+            }
+        });
+
+        // アニメーション
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+        }
+        animate();
+
+        // リサイズ
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>
