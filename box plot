@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>箱ひげ図パズル（31個・高速操作版）</title>
+<style>
+  body { 
+    font-family: "Helvetica Neue", Arial, sans-serif; 
+    text-align: center; 
+    color: #333; 
+    margin: 0; 
+    padding: 0; 
+    background-color: #fff; 
+    user-select: none;
+    font-size: 14px;
+  }
+  
+  h2 { margin: 10px 0 5px; color: #444; font-size: 1.2rem; }
+  
+  .wrapper {
+    width: 100%;
+    overflow-x: auto; 
+    padding-bottom: 20px;
+  }
+
+  .container {
+    width: 800px;
+    margin: 0 auto;
+    padding: 0 10px;
+    box-sizing: border-box;
+  }
+
+  .box-plot-area {
+    width: 100%;
+    height: 160px;
+    background: #fff;
+    border-radius: 4px;
+    border: 1px solid #ccc;
+    margin-bottom: 5px;
+    display: block; 
+  }
+  
+  .control-panel {
+    display: flex;
+    justify-content: center;
+    gap: 8px;
+    margin-bottom: 8px;
+    padding: 8px;
+    background: #f0f4f8;
+    border-radius: 8px;
+  }
+
+  .btn {
+    padding: 6px 12px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.9rem;
+    font-weight: bold;
+    color: #fff;
+    white-space: nowrap;
+  }
+  .btn-next { background-color: #3498db; }
+  .btn-undo { background-color: #f1c40f; color: #333; }
+  .btn-reset { background-color: #95a5a6; }
+  .btn-hint { background-color: #e67e22; }
+
+  .instruction {
+    font-size: 0.8rem;
+    color: #666;
+    margin-bottom: 5px;
+  }
+
+  .chart-area {
+    display: flex;
+    justify-content: center;
+    align-items: flex-end; 
+    height: 300px; /* ドットを小さくしたので高さはこれくらいでOK */
+    border-bottom: 2px solid #555;
+    background-color: #fafafa;
+    padding-bottom: 5px; 
+    /* タッチ操作のスクロール防止（長押し描画のため） */
+    touch-action: none; 
+  }
+
+  .column {
+    flex: 1;
+    margin: 0 1px; 
+    display: flex;
+    flex-direction: column-reverse; 
+    cursor: pointer;
+    position: relative;
+    height: 100%;
+    min-width: 40px; 
+  }
+  .column:hover { background-color: #e6f7ff; }
+
+  /* ドットを小さく平べったくして積みやすくする */
+  .dot {
+    width: 26px; height: 16px; /* 扁平な形状 */
+    background-color: #2c3e50;
+    border-radius: 4px; /* 丸ではなく四角っぽく */
+    margin: 1px auto;
+    box-shadow: 0 1px 1px rgba(0,0,0,0.2);
+    pointer-events: none;
+    flex-shrink: 0; 
+  }
+  .dot-ghost {
+    background-color: #e74c3c;
+    opacity: 0.4;
+    border: 1px solid #fff;
+  }
+  
+  .col-label {
+    width: 100%;
+    text-align: center;
+    font-size: 1rem;
+    font-weight: bold;
+    color: #555;
+    height: 30px;       
+    line-height: 30px;
+    margin-top: 5px;
+    flex-shrink: 0;     
+    border-top: 1px solid #eee; 
+  }
+
+  #msgArea {
+    font-size: 1rem;
+    font-weight: bold;
+    height: 1.4em;
+    margin: 5px 0;
+  }
+  .text-success { color: #27ae60; }
+  .text-alert { color: #e74c3c; }
+
+</style>
+</head>
+<body>
+
+  <h2>箱ひげ図パズル（n=31・連打不要版）</h2>
+  
+  <div class="wrapper">
+    <div class="container">
+      
+      <div class="control-panel">
+        <button class="btn btn-next" onclick="generateRandomTarget()">次の問題</button>
+        <button class="btn btn-undo" onclick="undoLastDot()">↶ 1つ戻る</button>
+        <button class="btn btn-reset" onclick="resetUserDots()">全リセット</button>
+        <button class="btn btn-hint" onclick="toggleAnswer()">正解例</button>
+      </div>
+
+      <div class="instruction">
+        <strong>長押し・ドラッグ</strong>で連続して置けます ／ 右クリックで削除
+      </div>
+
+      <div id="msgArea">データを31個置いてください</div>
+
+      <svg id="boxSvg" class="box-plot-area" viewBox="0 0 800 160" xmlns="http://www.w3.org/2000/svg"></svg>
+
+      <div class="chart-area" id="chart"></div>
+      
+    </div>
+  </div>
+
+<script>
+  // --- 設定：データ数を31個に変更 ---
+  const MIN_SCALE = 0;
+  const MAX_SCALE = 10;
+  const TOTAL_DOTS = 31; 
+
+  let userCounts = new Array(MAX_SCALE - MIN_SCALE + 1).fill(0);
+  let actionHistory = []; 
+  let targetData = []; 
+  let targetStats = { min:0, q1:0, med:0, q3:0, max:0 };
+  let showAnswerMode = false;
+  
+  // 連続入力用タイマー
+  let intervalId = null;
+
+  function init() {
+    createChartGrid();
+    generateRandomTarget();
+    
+    // 画面外でマウスを離したときの対策
+    document.addEventListener('mouseup', stopPress);
+    document.addEventListener('touchend', stopPress);
+  }
+
+  function createChartGrid() {
+    const chart = document.getElementById('chart');
+    chart.innerHTML = '';
+    
+    for (let i = MIN_SCALE; i <= MAX_SCALE; i++) {
+      const col = document.createElement('div');
+      col.className = 'column';
+      
+      // --- 連続入力（長押し）の実装 ---
+      // マウスダウン / タッチ開始
+      const startAdd = (e) => {
+        if(e.type === 'touchstart') e.preventDefault(); // スクロール防止
+        updateDot(i, 1, true); // まず1個置く
+        // 押しっぱなしなら連続で置く
+        intervalId = setInterval(() => {
+          updateDot(i, 1, true);
+        }, 150); // 0.15秒ごとに配置
+      };
+      
+      col.addEventListener('mousedown', (e) => {
+        if(e.button !== 0) return; // 左クリックのみ
+        startAdd(e);
+      });
+      col.addEventListener('touchstart', startAdd, {passive: false});
+
+      // 右クリック（削除）
+      col.oncontextmenu = (e) => { 
+        e.preventDefault(); 
+        updateDot(i, -1, true); 
+        return false; 
+      };
+
+      const label = document.createElement('div');
+      label.className = 'col-label';
+      label.textContent = i;
+      col.appendChild(label);
+      
+      chart.appendChild(col);
+    }
+  }
+
+  function stopPress() {
+    if(intervalId) {
+      clearInterval(intervalId);
+      intervalId = null;
+    }
+  }
+
+  function generateRandomTarget() {
+    showAnswerMode = false;
+    userCounts.fill(0);
+    actionHistory = [];
+    document.getElementById('msgArea').innerText = `データを${TOTAL_DOTS}個置いてください`;
+    document.getElementById('msgArea').className = "";
+
+    const r = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
+    
+    let min = r(0, 4); 
+    let max = r(Math.max(6, min + 4), 10);
+    let med = r(min + 1, max - 1);
+    let q1 = r(min, med);
+    let q3 = r(med, max);
+
+    const points = [min, q1, med, q3, max].sort((a,b)=>a-b);
+    targetStats = { min: points[0], q1: points[1], med: points[2], q3: points[3], max: points[4] };
+    
+    targetData = generateDataFromStats(targetStats);
+    updateView();
+  }
+
+  function generateDataFromStats(stats) {
+    let d = new Array(TOTAL_DOTS).fill(0);
+    // 31個の場合のインデックス (0始まり)
+    // min:0, q1:7, med:15, q3:23, max:30
+    d[0] = stats.min; 
+    d[7] = stats.q1; 
+    d[15] = stats.med; 
+    d[23] = stats.q3; 
+    d[30] = stats.max;
+    
+    const fillGap = (startIdx, endIdx) => {
+      const valStart = d[startIdx];
+      const valEnd = d[endIdx];
+      for(let i = startIdx + 1; i < endIdx; i++) {
+        const ratio = (i - startIdx) / (endIdx - startIdx);
+        let val = Math.round(valStart + (valEnd - valStart) * ratio);
+        d[i] = val;
+      }
+    };
+    fillGap(0, 7); fillGap(7, 15); fillGap(15, 23); fillGap(23, 30);
+    d.sort((a,b)=>a-b);
+    return d;
+  }
+
+  function resetUserDots() {
+    showAnswerMode = false;
+    userCounts.fill(0);
+    actionHistory = [];
+    updateView();
+  }
+
+  function undoLastDot() {
+    if (actionHistory.length === 0) return;
+    const lastAction = actionHistory.pop();
+    // 履歴に残さずに戻す
+    updateDot(lastAction.val, lastAction.delta * -1, false);
+  }
+
+  function updateDot(val, delta, isUserAction) {
+    const idx = val - MIN_SCALE;
+    const currentTotal = userCounts.reduce((a, b) => a + b, 0);
+
+    if (delta > 0) {
+      if (currentTotal >= TOTAL_DOTS) {
+        stopPress(); // 上限に達したら自動追加も止める
+        return;
+      }
+    }
+    if (delta < 0 && userCounts[idx] <= 0) return;
+
+    userCounts[idx] += delta;
+    
+    if (isUserAction) {
+      actionHistory.push({ val: val, delta: delta });
+    }
+
+    if(showAnswerMode) showAnswerMode = false;
+    updateView();
+  }
+
+  function toggleAnswer() {
+    showAnswerMode = !showAnswerMode;
+    updateView();
+  }
+
+  function updateView() {
+    renderDots();
+    renderBoxPlot();
+    checkResult();
+  }
+
+  function renderDots() {
+    const cols = document.querySelectorAll('.column');
+    const msg = document.getElementById('msgArea');
+    
+    let userTotal = 0;
+    userCounts.forEach((count, idx) => {
+      const col = cols[idx];
+      while (col.children.length > 1) {
+        col.removeChild(col.lastChild);
+      }
+      for (let i = 0; i < count; i++) {
+        const dot = document.createElement('div');
+        dot.className = 'dot';
+        col.appendChild(dot); 
+      }
+      userTotal += count;
+    });
+
+    if (showAnswerMode) {
+      let tCounts = new Array(userCounts.length).fill(0);
+      targetData.forEach(v => tCounts[v - MIN_SCALE]++);
+      tCounts.forEach((count, idx) => {
+        const col = cols[idx];
+        while (col.children.length > 1) col.removeChild(col.lastChild);
+        for(let i=0; i<count; i++){
+          const dot = document.createElement('div');
+          dot.className = 'dot dot-ghost';
+          col.appendChild(dot);
+        }
+      });
+      msg.innerText = "正解の配置例を表示中";
+      msg.className = "text-alert";
+      return;
+    }
+
+    if (userTotal < TOTAL_DOTS) {
+      msg.innerText = `あと ${TOTAL_DOTS - userTotal} 個`;
+      msg.className = "";
+    }
+  }
+
+  function getCurrentStats(counts) {
+    let data = [];
+    counts.forEach((c, i) => {
+      for(let k=0; k<c; k++) data.push(i + MIN_SCALE);
+    });
+    if (data.length < TOTAL_DOTS) return null;
+    // 31個の場合 (0-based index)
+    // min:0, q1:7, med:15, q3:23, max:30
+    return { min: data[0], q1: data[7], med: data[15], q3: data[23], max: data[30] };
+  }
+
+  function checkResult() {
+    const currentTotal = userCounts.reduce((a,b)=>a+b, 0);
+    const msg = document.getElementById('msgArea');
+    if (currentTotal < TOTAL_DOTS) return;
+
+    const curStats = getCurrentStats(userCounts);
+    if(!curStats) return;
+
+    const isMatch = (
+      curStats.min === targetStats.min &&
+      curStats.q1 === targetStats.q1 &&
+      curStats.med === targetStats.med &&
+      curStats.q3 === targetStats.q3 &&
+      curStats.max === targetStats.max
+    );
+
+    if (isMatch) {
+      msg.innerText = "お見事！正解です！🎉";
+      msg.className = "text-success";
+    } else {
+      msg.innerText = "形が違います。微調整してください";
+      msg.className = "text-alert";
+    }
+  }
+
+  function renderBoxPlot() {
+    const svg = document.getElementById('boxSvg');
+    svg.innerHTML = '';
+    
+    const w = 800; 
+    const padding = 40;
+    const drawW = w - padding * 2;
+    const scale = (v) => padding + (v - MIN_SCALE)/(MAX_SCALE - MIN_SCALE) * drawW;
+
+    for(let i=MIN_SCALE; i<=MAX_SCALE; i++) {
+      const x = scale(i);
+      const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+      line.setAttribute("x1", x); line.setAttribute("y1", 0);
+      line.setAttribute("x2", x); line.setAttribute("y2", 160);
+      line.setAttribute("stroke", "#eee");
+      svg.appendChild(line);
+      
+      if(i%2===0 || i===MAX_SCALE){ 
+        const txt = document.createElementNS("http://www.w3.org/2000/svg", "text");
+        txt.setAttribute("x", x); txt.setAttribute("y", 155);
+        txt.setAttribute("text-anchor", "middle");
+        txt.setAttribute("fill", "#888");
+        txt.textContent = i;
+        svg.appendChild(txt);
+      }
+    }
+
+    drawBox(svg, targetStats, scale, 40, "#e74c3c", "目標");
+    
+    let curData = [];
+    userCounts.forEach((c, i) => { for(let k=0;k<c;k++) curData.push(i + MIN_SCALE); });
+    if(curData.length > 0) {
+      curData.sort((a,b)=>a-b);
+      let tempStats;
+      if (curData.length === TOTAL_DOTS) {
+        tempStats = getCurrentStats(userCounts);
+      } else {
+        const n = curData.length;
+        tempStats = {
+          min: curData[0], max: curData[n-1],
+          med: curData[Math.floor(n/2)],
+          q1: curData[Math.floor(n/4)], q3: curData[Math.floor(n*0.75)]
+        };
+      }
+      drawBox(svg, tempStats, scale, 100, "#3498db", "あなた");
+    }
+  }
+
+  function drawBox(svg, s, scale, y, color, label) {
+    if(!s) return;
+    const h = 30;
+    const yTop = y - h/2;
+    const yBot = y + h/2;
+    const xMin = scale(s.min);
+    const xQ1  = scale(s.q1);
+    const xMed = scale(s.med);
+    const xQ3  = scale(s.q3);
+    const xMax = scale(s.max);
+
+    const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+    g.setAttribute("stroke", color);
+    g.setAttribute("stroke-width", 2);
+    g.setAttribute("fill", "none");
+
+    const line = (x1,x2) => {
+      const l = document.createElementNS("http://www.w3.org/2000/svg", "line");
+      l.setAttribute("x1", x1); l.setAttribute("y1", y);
+      l.setAttribute("x2", x2); l.setAttribute("y2", y);
+      l.setAttribute("stroke-dasharray", "4");
+      g.appendChild(l);
+    };
+    line(xMin, xQ1);
+    line(xQ3, xMax);
+
+    const vline = (x) => {
+      const l = document.createElementNS("http://www.w3.org/2000/svg", "line");
+      l.setAttribute("x1", x); l.setAttribute("y1", yTop+5);
+      l.setAttribute("x2", x); l.setAttribute("y2", yBot-5);
+      g.appendChild(l);
+    };
+    vline(xMin);
+    vline(xMax);
+
+    const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+    rect.setAttribute("x", xQ1); rect.setAttribute("y", yTop);
+    rect.setAttribute("width", Math.max(0, xQ3 - xQ1)); rect.setAttribute("height", h);
+    rect.setAttribute("fill", color); rect.setAttribute("fill-opacity", 0.1);
+    g.appendChild(rect);
+
+    const lMed = document.createElementNS("http://www.w3.org/2000/svg", "line");
+    lMed.setAttribute("x1", xMed); lMed.setAttribute("y1", yTop);
+    lMed.setAttribute("x2", xMed); lMed.setAttribute("y2", yBot);
+    lMed.setAttribute("stroke-width", 3);
+    g.appendChild(lMed);
+
+    const txt = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    txt.setAttribute("x", 40); txt.setAttribute("y", y+5);
+    txt.setAttribute("fill", color); txt.setAttribute("stroke", "none");
+    txt.setAttribute("font-weight", "bold");
+    txt.textContent = label;
+    g.appendChild(txt);
+
+    svg.appendChild(g);
+  }
+
+  init();
+</script>
+</body>
+</html>
