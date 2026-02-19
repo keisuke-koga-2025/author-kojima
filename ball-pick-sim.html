@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>確率シミュレーター（完成版）</title>
+<style>
+  body {
+    font-family: "Helvetica Neue", Arial, sans-serif;
+    text-align: center;
+    background-color: #f9f9f9;
+    color: #333;
+    margin: 0;
+    padding: 10px;
+    box-sizing: border-box;
+  }
+  .container {
+    max-width: 600px;
+    margin: 0 auto;
+    background: white;
+    padding: 20px;
+    border-radius: 15px;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+  }
+  h2 { margin-top: 0; color: #444; font-size: 1.2rem; }
+
+  /* --- 演出エリア --- */
+  .stage-area {
+    background-color: #eee;
+    border-radius: 10px;
+    padding: 15px;
+    margin-bottom: 20px;
+    position: relative;
+  }
+  
+  /* 箱の中身（小さな玉たち） */
+  .box-visual {
+    display: flex;
+    justify-content: center;
+    gap: 5px;
+    margin-bottom: 15px;
+    opacity: 0.7;
+  }
+  .small-ball {
+    width: 15px; height: 15px; border-radius: 50%;
+  }
+
+  /* 結果表示用の大きな玉 */
+  .result-display-wrapper {
+    height: 100px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+  }
+  .big-ball {
+    width: 80px; height: 80px;
+    border-radius: 50%;
+    border: 4px solid #fff;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+    background-color: #ddd; /* 初期色 */
+    transition: background-color 0.1s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: bold;
+    color: white;
+    font-size: 1.2rem;
+    text-shadow: 1px 1px 2px rgba(0,0,0,0.5);
+  }
+  .result-label {
+    margin-top: 5px;
+    font-weight: bold;
+    font-size: 1.1rem;
+    height: 1.5rem;
+  }
+
+  /* 玉の色定義 */
+  .bg-red { background-color: #ff4d4d !important; }
+  .bg-yellow { background-color: #ffeb3b !important; color: #333 !important; text-shadow: none !important; }
+  .bg-blue { background-color: #2196f3 !important; }
+  
+  /* メッセージエリア */
+  #message {
+    height: 24px;
+    font-weight: bold;
+    color: #d32f2f;
+    margin: 5px 0;
+    font-size: 0.9rem;
+  }
+
+  /* --- グラフエリア --- */
+  canvas {
+    width: 100%;
+    height: 220px; /* 少し高さを確保 */
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    margin-bottom: 10px;
+  }
+
+  /* --- コントロール --- */
+  .controls {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-bottom: 20px;
+  }
+  button {
+    padding: 12px;
+    font-size: 1rem;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: bold;
+  }
+  button:active { transform: scale(0.98); }
+  .btn-1 { background-color: #e0e0e0; color: #333; }
+  .btn-9 { background-color: #ff9800; color: white; }
+  .btn-900 { background-color: #9c27b0; color: white; }
+  .btn-reset { background-color: #607d8b; color: white; grid-column: span 2; }
+
+  /* --- データ表 --- */
+  .data-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9rem;
+  }
+  .data-table th, .data-table td {
+    border: 1px solid #ccc;
+    padding: 6px;
+    text-align: center;
+  }
+  .data-table th { background-color: #f0f4f8; }
+  .row-red { background-color: #ffebee; }
+  .row-yellow { background-color: #fffde7; }
+  .row-blue { background-color: #e3f2fd; }
+
+</style>
+</head>
+<body>
+
+<div class="container">
+  <h2>確率実験シミュレーター</h2>
+  
+  <div class="stage-area">
+    <div style="font-size:0.8rem; color:#666; margin-bottom:5px;">箱の中身（全9個）</div>
+    <div class="box-visual">
+      <div class="small-ball bg-red"></div><div class="small-ball bg-red"></div><div class="small-ball bg-red"></div><div class="small-ball bg-red"></div>
+      <div class="small-ball bg-yellow"></div><div class="small-ball bg-yellow"></div>
+      <div class="small-ball bg-blue"></div><div class="small-ball bg-blue"></div><div class="small-ball bg-blue"></div>
+    </div>
+
+    <div class="result-display-wrapper">
+      <div id="big-ball" class="big-ball">?</div>
+      <div id="result-text" class="result-label"></div>
+    </div>
+  </div>
+
+  <div id="message"></div>
+
+  <canvas id="probChart"></canvas>
+
+  <div class="controls">
+    <button class="btn-1" onclick="runSimulation(1)">1回ひく</button>
+    <button class="btn-9" onclick="runSimulation(9)">9回 (かりん)</button>
+    <button class="btn-900" onclick="runSimulation(900)">900回 (けいた)</button>
+    <button class="btn-reset" onclick="resetSim()">リセット</button>
+  </div>
+  
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>色</th>
+        <th>回数</th>
+        <th>相対度数</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr class="row-red">
+        <td>赤</td>
+        <td id="td-count-red">0</td>
+        <td id="td-prob-red">0.000</td>
+      </tr>
+      <tr class="row-yellow">
+        <td>黄</td>
+        <td id="td-count-yellow">0</td>
+        <td id="td-prob-yellow">0.000</td>
+      </tr>
+      <tr class="row-blue">
+        <td>青</td>
+        <td id="td-count-blue">0</td>
+        <td id="td-prob-blue">0.000</td>
+      </tr>
+      <tr style="font-weight:bold; background:#fafafa;">
+        <td>合計</td>
+        <td id="td-count-total">0</td>
+        <td>1.000</td>
+      </tr>
+    </tbody>
+  </table>
+  <div style="font-size:0.8rem; color:#888; margin-top:5px;">赤の理論値 = 4/9 (約0.444)</div>
+</div>
+
+<script>
+  // --- 設定 ---
+  const balls = [
+    'red', 'red', 'red', 'red', 
+    'yellow', 'yellow', 
+    'blue', 'blue', 'blue'
+  ]; 
+  const colorLabels = { red: "赤", yellow: "黄", blue: "青" };
+  const THEORETICAL_PROB = 4 / 9;
+
+  // --- 変数 ---
+  let totalTrials = 0;
+  let counts = { red: 0, yellow: 0, blue: 0 };
+  let historyData = []; 
+  let isRunning = false;
+
+  // --- Canvas準備 ---
+  const canvas = document.getElementById('probChart');
+  const ctx = canvas.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  
+  // 初期リサイズ
+  resizeCanvas();
+
+  function resizeCanvas() {
+    const rect = canvas.getBoundingClientRect();
+    canvas.width = rect.width * dpr;
+    canvas.height = rect.height * dpr;
+    ctx.scale(dpr, dpr);
+    drawChart();
+  }
+  window.addEventListener('resize', resizeCanvas);
+
+  // --- グラフ描画関数 ---
+  function drawChart() {
+    const rect = canvas.getBoundingClientRect();
+    const width = rect.width;
+    const height = rect.height;
+    ctx.clearRect(0, 0, width, height);
+
+    // 余白設定（軸ラベル用）
+    const paddingLeft = 45;
+    const paddingBottom = 30;
+    const paddingTop = 10;
+    const paddingRight = 10;
+    
+    const graphW = width - paddingLeft - paddingRight;
+    const graphH = height - paddingTop - paddingBottom;
+    
+    // 枠線
+    ctx.strokeStyle = '#ccc';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(paddingLeft, paddingTop, graphW, graphH);
+
+    // --- 軸ラベルの描画 ---
+    ctx.fillStyle = '#666';
+    ctx.font = '10px sans-serif';
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'middle';
+
+    // 縦軸 (相対度数)
+    // 1.0
+    ctx.fillText('1.0', paddingLeft - 5, paddingTop);
+    // 0.5
+    ctx.fillText('0.5', paddingLeft - 5, paddingTop + graphH * 0.5);
+    // 0
+    ctx.fillText('0', paddingLeft - 5, paddingTop + graphH);
+    
+    // 縦軸タイトル（回転させる）
+    ctx.save();
+    ctx.translate(15, paddingTop + graphH / 2);
+    ctx.rotate(-Math.PI / 2);
+    ctx.textAlign = 'center';
+    ctx.fillText('相対度数', 0, 0);
+    ctx.restore();
+
+    // グリッド線
+    ctx.strokeStyle = '#eee';
+    ctx.beginPath();
+    ctx.moveTo(paddingLeft, paddingTop + graphH * 0.5);
+    ctx.lineTo(paddingLeft + graphW, paddingTop + graphH * 0.5);
+    ctx.stroke();
+
+    // 理論値ライン (4/9)
+    const targetY = paddingTop + graphH * (1 - THEORETICAL_PROB);
+    ctx.strokeStyle = '#888';
+    ctx.setLineDash([5, 5]);
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(paddingLeft, targetY);
+    ctx.lineTo(paddingLeft + graphW, targetY);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // 横軸 (試行回数)
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    const maxX = historyData.length > 0 ? Math.max(10, historyData[historyData.length - 1].x) : 10;
+    
+    // 0
+    ctx.fillText('0', paddingLeft, paddingTop + graphH + 5);
+    // Max値
+    ctx.fillText(maxX, paddingLeft + graphW, paddingTop + graphH + 5);
+    // 横軸タイトル
+    ctx.fillText('試行回数', paddingLeft + graphW / 2, paddingTop + graphH + 18);
+
+    // --- データのプロット ---
+    if (historyData.length === 0) return;
+
+    ctx.strokeStyle = '#d32f2f';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    historyData.forEach((point, index) => {
+      const x = paddingLeft + (point.x / maxX) * graphW;
+      const y = paddingTop + graphH * (1 - point.y);
+      if (index === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+  }
+
+  // --- シミュレーション実行 ---
+  function runSimulation(count) {
+    if (isRunning) return;
+    isRunning = true;
+    document.getElementById('message').innerText = "";
+    
+    let currentStep = 0;
+    // 演出スピード調整
+    const isFast = count > 100;
+    const batchSize = isFast ? 50 : 1; 
+    const intervalTime = isFast ? 20 : 150; // 少回数はゆっくり見せる
+
+    const interval = setInterval(() => {
+      for(let i=0; i<batchSize; i++){
+        if(currentStep >= count) break;
+        
+        // 抽選
+        const pick = balls[Math.floor(Math.random() * balls.length)];
+        totalTrials++;
+        counts[pick]++;
+        currentStep++;
+        
+        // 演出更新（高速モードなら最後だけ、低速なら毎回）
+        if (!isFast || (isFast && i === batchSize - 1)) {
+           updateVisual(pick);
+        }
+
+        // グラフ用データ記録
+        if (totalTrials < 200 || totalTrials % 10 === 0) {
+           historyData.push({ x: totalTrials, y: counts.red / totalTrials });
+        }
+      }
+
+      updateTable();
+      drawChart();
+
+      if (currentStep >= count) {
+        clearInterval(interval);
+        isRunning = false;
+        checkClimax(count);
+      }
+    }, intervalTime);
+  }
+
+  // --- 表示更新系 ---
+  function updateVisual(color) {
+    const bigBall = document.getElementById('big-ball');
+    const label = document.getElementById('result-text');
+    
+    // クラスリセット
+    bigBall.className = 'big-ball';
+    // 色クラス付与
+    bigBall.classList.add('bg-' + color);
+    bigBall.innerText = ""; // 中の文字を消す
+    
+    label.innerText = colorLabels[color] + "が出ました";
+    label.style.color = (color === 'red' ? '#d32f2f' : (color === 'blue' ? '#1976d2' : '#fbc02d'));
+  }
+
+  function updateTable() {
+    document.getElementById('td-count-total').innerText = totalTrials;
+    ['red', 'yellow', 'blue'].forEach(color => {
+      document.getElementById(`td-count-${color}`).innerText = counts[color];
+      let rate = totalTrials === 0 ? 0 : counts[color] / totalTrials;
+      document.getElementById(`td-prob-${color}`).innerText = rate.toFixed(3);
+    });
+  }
+
+  function checkClimax(addedCount) {
+    if (addedCount >= 900) {
+      const msgDiv = document.getElementById('message');
+      if (counts.red === 400) {
+        msgDiv.innerText = "★奇跡！！ ピッタリ400回が出ました！★";
+      } else {
+        const diff = counts.red - 400;
+        msgDiv.innerText = `900回完了！ 400回とのズレ: ${diff > 0 ? '+' : ''}${diff}回`;
+      }
+    }
+  }
+
+  function resetSim() {
+    if (isRunning) return;
+    totalTrials = 0;
+    counts = { red: 0, yellow: 0, blue: 0 };
+    historyData = [];
+    
+    // 表示リセット
+    document.getElementById('message').innerText = "";
+    document.getElementById('big-ball').className = 'big-ball';
+    document.getElementById('big-ball').innerText = "?";
+    document.getElementById('big-ball').style.backgroundColor = "#ddd";
+    document.getElementById('result-text').innerText = "";
+    
+    updateTable();
+    drawChart();
+  }
+</script>
+</body>
+</html>
