@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>カスタム3Dサイコロ（完成版）</title>
+    <style>
+        body {
+            font-family: "Hiragino Kaku Gothic ProN", "Meiryo", sans-serif;
+            text-align: center;
+            margin: 0;
+            padding: 0;
+            background-color: transparent;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            height: 100vh;
+        }
+
+        /* --- 3D空間の設定 --- */
+        .scene {
+            width: 100%;
+            height: 320px;
+            perspective: 1000px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 60px;
+            padding-top: 40px;
+        }
+
+        .cube {
+            width: 80px;
+            height: 80px;
+            position: relative;
+            transform-style: preserve-3d;
+            transform: translateZ(0px) rotateX(-20deg) rotateY(30deg);
+        }
+
+        .face {
+            position: absolute;
+            width: 80px;
+            height: 80px;
+            border: 2px solid rgba(0,0,0,0.15);
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 28px;
+            font-weight: bold;
+            color: white;
+            box-sizing: border-box;
+            backface-visibility: hidden;
+            box-shadow: inset 0 0 15px rgba(0,0,0,0.2);
+            text-shadow: 1px 1px 2px rgba(0,0,0,0.3);
+        }
+
+        /* 面の座標定義 */
+        .front  { transform: rotateY(0deg) translateZ(40px); }
+        .back   { transform: rotateY(180deg) translateZ(40px); }
+        .right  { transform: rotateY(90deg) translateZ(40px); }
+        .left   { transform: rotateY(-90deg) translateZ(40px); }
+        .top    { transform: rotateX(90deg) translateZ(40px); }
+        .bottom { transform: rotateX(-90deg) translateZ(40px); }
+
+        /* --- ボタン類 --- */
+        .controls { margin-top: 10px; z-index: 5; }
+
+        button.roll-btn {
+            font-size: 18px;
+            padding: 12px 40px;
+            cursor: pointer;
+            border: none;
+            border-radius: 50px;
+            background: linear-gradient(145deg, #2e86de, #0984e3);
+            color: white;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+            font-weight: bold;
+            transition: transform 0.1s;
+        }
+        button.roll-btn:active { transform: scale(0.95); }
+        button.roll-btn:disabled { background: #b2bec3; cursor: not-allowed; }
+
+        /* 設定ボタン */
+        .settings-btn {
+            position: absolute; bottom: 10px; right: 10px;
+            background: none; border: none; font-size: 24px; cursor: pointer;
+            opacity: 0.5; transition: opacity 0.2s; z-index: 20;
+        }
+        .settings-btn:hover { opacity: 1; }
+
+        /* --- 設定モーダル --- */
+        .modal {
+            display: none;
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.5); z-index: 100;
+            justify-content: center; align-items: center;
+        }
+        .modal-content {
+            background: white; padding: 20px; border-radius: 10px;
+            width: 95%; max-width: 550px; max-height: 90vh;
+            overflow-y: auto; text-align: left;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.3);
+        }
+        .modal h3 { margin-top: 0; border-bottom: 2px solid #eee; padding-bottom: 10px; }
+        
+        .config-row { display: flex; gap: 15px; margin-bottom: 15px; }
+        .die-config { flex: 1; }
+        .die-config h4 { margin: 5px 0; font-size: 14px; text-align: center; color: #555; }
+        
+        .face-input {
+            display: flex; gap: 5px; margin-bottom: 6px; align-items: center;
+        }
+        .face-label { font-size: 10px; width: 15px; color: #888; text-align: right; }
+        
+        /* 色選択プルダウン */
+        select.color-select {
+            width: 60px; height: 30px; border: 1px solid #ccc; border-radius: 4px;
+            cursor: pointer; font-size: 12px; padding: 0 5px;
+            /* 初期状態で見やすくするためのスタイル */
+            background-color: #fff; color: #333;
+            -webkit-appearance: none; /* Chrome, Safariでの見た目調整 */
+            appearance: none;
+            text-align: center;
+            font-weight: bold;
+        }
+        
+        /* 文字入力 */
+        input[type="text"] { 
+            flex: 1; padding: 5px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; 
+        }
+
+        .modal-actions {
+            display: flex; justify-content: space-between; margin-top: 20px; padding-top: 10px; border-top: 1px solid #eee;
+        }
+        .preset-area { margin-bottom: 10px; text-align: center; }
+        .preset-btn { background: #dfe6e9; color: #333; border: none; padding: 6px 10px; border-radius: 4px; font-size: 12px; cursor: pointer; margin: 2px; }
+        .save-btn { background: #2e86de; color: white; border: none; padding: 10px 25px; border-radius: 5px; cursor: pointer; font-weight: bold; }
+        
+    </style>
+</head>
+<body>
+
+    <div class="scene">
+        <div class="cube" id="dice1">
+            <div class="face front"></div><div class="face back"></div>
+            <div class="face right"></div><div class="face left"></div>
+            <div class="face top"></div><div class="face bottom"></div>
+        </div>
+        <div class="cube" id="dice2">
+            <div class="face front"></div><div class="face back"></div>
+            <div class="face right"></div><div class="face left"></div>
+            <div class="face top"></div><div class="face bottom"></div>
+        </div>
+    </div>
+
+    <div class="controls">
+        <button class="roll-btn" id="rollBtn" onclick="rollDice()">サイコロを振る</button>
+    </div>
+
+    <button class="settings-btn" onclick="openSettings()">⚙️</button>
+
+    <div class="modal" id="settingsModal">
+        <div class="modal-content">
+            <h3>サイコロ設定</h3>
+            
+            <div class="preset-area">
+                <small>プリセット: </small>
+                <button class="preset-btn" onclick="loadPreset('standard')">標準(確率実験)</button>
+                <button class="preset-btn" onclick="loadPreset('diff')">色違い</button>
+                <button class="preset-btn" onclick="loadPreset('number')">数字(1-6)</button>
+                <button class="preset-btn" onclick="loadPreset('coin')">コイン(白黒)</button>
+            </div>
+
+            <div class="config-row">
+                <div class="die-config" id="configD1"></div>
+                <div class="die-config" id="configD2"></div>
+            </div>
+
+            <div class="modal-actions">
+                <button class="preset-btn" onclick="closeSettings()" style="background:#ff7675; color:white;">キャンセル</button>
+                <button class="save-btn" onclick="saveSettings()">設定を反映</button>
+            </div>
+        </div>
+    </div>
+
+<script>
+    // --- 色の定義 ---
+    const colorPalette = {
+        '#ff6b6b': '赤', '#54a0ff': '青', '#feca57': '黄', '#1dd1a1': '緑',
+        '#ffffff': '白', '#333333': '黒', '#a29bfe': '紫', '#ff9f43': '橙'
+    };
+
+    // 初期データ (標準: 青3, 黄2, 赤1)
+    const standardSet = [
+        { c: '#54a0ff', t: '青' }, { c: '#54a0ff', t: '青' }, { c: '#54a0ff', t: '青' },
+        { c: '#feca57', t: '黄' }, { c: '#feca57', t: '黄' },
+        { c: '#ff6b6b', t: '赤' }
+    ];
+
+    let currentSettings = {
+        d1: JSON.parse(JSON.stringify(standardSet)),
+        d2: JSON.parse(JSON.stringify(standardSet))
+    };
+
+    const faceRotations = [
+        { x: 0, y: 0 }, { x: 0, y: 180 }, { x: 0, y: -90 }, 
+        { x: 0, y: 90 }, { x: -90, y: 0 }, { x: 90, y: 0 }
+    ];
+
+    const dice1El = document.getElementById('dice1');
+    const dice2El = document.getElementById('dice2');
+    const btn = document.getElementById('rollBtn');
+
+    function init() {
+        renderDiceFaces();
+        generateConfigInputs();
+    }
+
+    // サイコロの見た目を更新
+    function renderDiceFaces() {
+        const updateFaces = (diceEl, data) => {
+            const faces = diceEl.querySelectorAll('.face');
+            faces.forEach((el, i) => {
+                el.style.backgroundColor = data[i].c;
+                el.innerText = data[i].t;
+                // 明るい色のときは文字を黒くする判定
+                const c = data[i].c;
+                if(c === '#feca57' || c === '#ffffff' || c === '#1dd1a1' || c === '#ff9f43') {
+                    el.style.color = '#333';
+                    el.style.textShadow = 'none';
+                } else {
+                    el.style.color = '#fff';
+                    el.style.textShadow = '1px 1px 2px rgba(0,0,0,0.3)';
+                }
+            });
+        };
+        updateFaces(dice1El, currentSettings.d1);
+        updateFaces(dice2El, currentSettings.d2);
+    }
+
+    // サイコロを振る
+    function rollDice() {
+        btn.disabled = true;
+        dice1El.style.transition = 'none'; dice2El.style.transition = 'none';
+        dice1El.style.transform = 'translateZ(-800px) rotateX(720deg) rotateY(720deg)';
+        dice2El.style.transform = 'translateZ(-800px) rotateX(720deg) rotateY(-720deg)';
+
+        setTimeout(() => {
+            const r1 = Math.floor(Math.random() * 6);
+            const r2 = Math.floor(Math.random() * 6);
+            const t1 = faceRotations[r1];
+            const t2 = faceRotations[r2];
+
+            dice1El.style.transition = 'transform 1.2s cubic-bezier(0.15, 0.9, 0.34, 1)';
+            dice2El.style.transition = 'transform 1.2s cubic-bezier(0.15, 0.9, 0.34, 1)';
+
+            dice1El.style.transform = `translateZ(0px) rotateX(${t1.x + 1080}deg) rotateY(${t1.y + 1080}deg)`;
+            dice2El.style.transform = `translateZ(0px) rotateX(${t2.x + 1440}deg) rotateY(${t2.y + 720}deg)`;
+
+            setTimeout(() => { btn.disabled = false; }, 1200);
+        }, 50);
+    }
+
+    // --- 設定画面関係 ---
+    
+    // プルダウン自体の色を更新する関数
+    function updateSelectStyle(selectElement) {
+        const color = selectElement.value;
+        selectElement.style.backgroundColor = color;
+        // 黒背景の時だけ文字を白にする単純判定
+        selectElement.style.color = (color === '#333333') ? '#ffffff' : '#333333';
+    }
+
+    function generateConfigInputs() {
+        let optionsHtml = '';
+        for (const [hex, name] of Object.entries(colorPalette)) {
+            optionsHtml += `<option value="${hex}" style="background-color:${hex}; color:${(hex==='#333333'?'white':'black')}">${name}</option>`;
+        }
+
+        const createInputs = (containerId, prefix) => {
+            const container = document.getElementById(containerId);
+            container.innerHTML = `<h4>${containerId === 'configD1' ? '左のサイコロ' : '右のサイコロ'}</h4>`;
+            for(let i=0; i<6; i++) {
+                container.innerHTML += `
+                    <div class="face-input">
+                        <span class="face-label">${i+1}</span>
+                        <select class="color-select" id="${prefix}-c-${i}" onchange="updateSelectStyle(this)">
+                            ${optionsHtml}
+                        </select>
+                        <input type="text" id="${prefix}-t-${i}" maxlength="4" placeholder="文字">
+                    </div>
+                `;
+            }
+        };
+        createInputs('configD1', 'd1');
+        createInputs('configD2', 'd2');
+    }
+
+    function openSettings() {
+        document.getElementById('settingsModal').style.display = 'flex';
+        updateInputsFromState();
+    }
+    function closeSettings() { document.getElementById('settingsModal').style.display = 'none'; }
+
+    // 現在の状態を入力欄（プルダウンの色含む）に反映
+    function updateInputsFromState() {
+        const setInputs = (prefix, data) => {
+            for(let i=0; i<6; i++) {
+                const select = document.getElementById(`${prefix}-c-${i}`);
+                select.value = data[i].c; 
+                updateSelectStyle(select); // ここでプルダウン自体の色を更新
+                document.getElementById(`${prefix}-t-${i}`).value = data[i].t;
+            }
+        };
+        setInputs('d1', currentSettings.d1);
+        setInputs('d2', currentSettings.d2);
+    }
+
+    function saveSettings() {
+        const getInputs = (prefix) => {
+            const arr = [];
+            for(let i=0; i<6; i++) {
+                arr.push({
+                    c: document.getElementById(`${prefix}-c-${i}`).value,
+                    t: document.getElementById(`${prefix}-t-${i}`).value
+                });
+            }
+            return arr;
+        };
+        currentSettings.d1 = getInputs('d1');
+        currentSettings.d2 = getInputs('d2');
+        renderDiceFaces();
+        closeSettings();
+        dice1El.style.transform = 'translateZ(0px) rotateX(-20deg) rotateY(30deg)';
+        dice2El.style.transform = 'translateZ(0px) rotateX(-20deg) rotateY(-30deg)';
+    }
+
+    function loadPreset(type) {
+        let set1, set2;
+        if (type === 'standard') {
+            set1 = JSON.parse(JSON.stringify(standardSet));
+            set2 = JSON.parse(JSON.stringify(standardSet));
+        } else if (type === 'diff') {
+            set1 = JSON.parse(JSON.stringify(standardSet));
+            set2 = [{c:'#1dd1a1', t:'緑'}, {c:'#1dd1a1', t:'緑'}, {c:'#1dd1a1', t:'緑'}, {c:'#a29bfe', t:'紫'}, {c:'#a29bfe', t:'紫'}, {c:'#ff9f43', t:'橙'}];
+        } else if (type === 'number') {
+            const numSet = [{c:'#ffffff', t:'1'}, {c:'#ffffff', t:'2'}, {c:'#ffffff', t:'3'}, {c:'#ffffff', t:'4'}, {c:'#ffffff', t:'5'}, {c:'#ffffff', t:'6'}];
+            set1 = JSON.parse(JSON.stringify(numSet)); set2 = JSON.parse(JSON.stringify(numSet));
+        } else if (type === 'coin') {
+            const coinSet = [{c:'#ffffff', t:'白'}, {c:'#ffffff', t:'白'}, {c:'#ffffff', t:'白'}, {c:'#333333', t:'黒'}, {c:'#333333', t:'黒'}, {c:'#333333', t:'黒'}];
+            set1 = coinSet; set2 = coinSet;
+        }
+        currentSettings.d1 = set1;
+        currentSettings.d2 = set2;
+        updateInputsFromState(); // プリセット読み込み時もプルダウンの色を更新
+    }
+
+    init();
+</script>
+
+</body>
+</html>
